@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Gestão - Nova Gaiola</title>
+  <style>
+    body { font-family: Arial, Helvetica, sans-serif; margin: 16px; background:#f7f8fb; color:#111;}
+    h1 { margin: 0 0 8px 0; font-size: 20px; }
+    .card { background:white; border-radius:8px; padding:12px; box-shadow:0 1px 4px rgba(0,0,0,0.06); margin-bottom:12px; }
+    .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+    label { font-size:13px; margin-right:6px; }
+    input[type="file"] { display:block; }
+    button { background:#0b6efd; color:white; border:none; padding:8px 10px; border-radius:6px; cursor:pointer; }
+    button.secondary { background:#6c757d; }
+    table { width:100%; border-collapse:collapse; font-size:13px; margin-top:8px;}
+    th, td { padding:8px; border-bottom:1px solid #eee; text-align:left; }
+    th { background:#fafbff; position:sticky; top:0; }
+    .controls { display:flex; gap:8px; flex-wrap:wrap; }
+    .small { padding:6px 8px; font-size:13px; }
+    .danger { background:#dc3545; }
+    .green { background:#198754; }
+    .muted { color:#666; font-size:13px; }
+    .inline { display:inline-block; vertical-align:middle; }
+    select, input[type="text"], input[type="number"] { padding:6px; border-radius:6px; border:1px solid #ddd; }
+    .half { width:200px; }
+    .flex-col { display:flex; flex-direction:column; gap:8px; }
+    .toolbar { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px; flex-wrap:wrap; }
+    .notice { background:#fff3cd; border:1px solid #ffeeba; padding:8px; border-radius:6px; color:#856404; margin-bottom:12px; }
+  </style>
+  <!-- SheetJS (XLSX) via CDN -->
+  <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <h1>Gestão de Códigos — Nova Gaiola</h1>
+
+  <div class="notice card">
+    <strong>Resumo:</strong> Ao <em>Importar e Substituir Códigos</em> a aba <code>BaseAtual</code> será totalmente sobrescrita — o <code>Histórico</code> permanece inalterado.
+  </div>
+
+  <div class="card">
+    <div class="toolbar">
+      <div class="controls">
+        <div>
+          <label for="fileInput">Importar Excel (.xlsx / .xls / .csv)</label><br>
+          <input id="fileInput" type="file" accept=".xlsx,.xls,.csv" />
+        </div>
+        <div>
+          <button id="previewBtn" class="small">Visualizar arquivo</button>
+          <button id="importBtn" class="small green">Importar e Substituir Códigos</button>
+        </div>
+        <div>
+          <button id="exportBaseBtn" class="small secondary">Exportar BaseAtual (CSV)</button>
+          <button id="exportHistBtn" class="small secondary">Exportar Histórico (CSV)</button>
+        </div>
+      </div>
+
+      <div class="muted">
+        Dados salvos localmente no navegador. Faça export para backup.
+      </div>
+    </div>
+
+    <div id="previewArea" style="display:none; margin-top:8px;">
+      <strong>Pré-visualização (primeiras linhas):</strong>
+      <div id="previewTable" style="max-height:240px; overflow:auto; margin-top:8px;"></div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div style="flex:1 1 420px;" class="card">
+      <h3>Registrar retirada</h3>
+      <div class="flex-col">
+        <div>
+          <label>Código</label><br>
+          <select id="selectCodigo" class="half"></select>
+        </div>
+        <div>
+          <label>Quantidade</label><br>
+          <input id="retQtd" type="number" min="1" value="1" class="half" />
+        </div>
+        <div>
+          <label>Responsável</label><br>
+          <input id="retResp" type="text" placeholder="Nome do colaborador" class="half" />
+        </div>
+        <div>
+          <label>Observações</label><br>
+          <input id="retObs" type="text" placeholder="Observações (opcional)" />
+        </div>
+        <div>
+          <button id="registrarRet" class="small">Registrar Retirada</button>
+        </div>
+      </div>
+    </div>
+
+    <div style="flex:1 1 560px;" class="card">
+      <h3>BaseAtual</h3>
+      <div id="baseTableWrap" style="max-height:340px; overflow:auto;"></div>
+      <div style="margin-top:8px;">
+        <button id="clearBaseBtn" class="small danger">Limpar BaseAtual</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Histórico de Retiradas</h3>
+    <div id="histTableWrap" style="max-height:360px; overflow:auto;"></div>
+    <div style="margin-top:8px;">
+      <button id="clearHistBtn" class="small danger">Limpar Histórico (apaga tudo)</button>
+    </div>
+  </div>
+
+<script>
+/*
+  Sistema simples de importação e histórico:
+  - Usa SheetJS (XLSX) para ler planilhas no navegador
+  - Persistência via localStorage nas chaves: baseAtual / historicoRetiradas
+*/
+
+// --- Helpers CSV / download
+function download(filename, text) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], {type: 'text/csv;charset=utf-8;'}));
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+function toCSV(array) {
+  if(!array || !array.length) return '';
+  const keys = Object.keys(array[0]);
+  const lines = [keys.join(',')];
+  array.forEach(obj => {
+    const row = keys.map(k => {
+      let v = obj[k]===undefined || obj[k]===null ? '' : String(obj[k]);
+      if(v.includes(',')||v.includes('"')||v.includes('\n')) v = '"' + v.replace(/"/g,'""') + '"';
+      return v;
+    });
+    lines.push(row.join(','));
+  });
+  return lines.join('\n');
+}
+
+// --- Local storage helpers
+const KEY_BASE = 'novagaiola_baseAtual_v1';
+const KEY_HIST = 'novagaiola_historicoRetiradas_v1';
+function saveBase(base){ localStorage.setItem(KEY_BASE, JSON.stringify(base || [])); }
+function loadBase(){ try{ return JSON.parse(localStorage.getItem(KEY_BASE)) || []; }catch(e){ return []; } }
+function saveHist(hist){ localStorage.setItem(KEY_HIST, JSON.stringify(hist || [])); }
+function loadHist(){ try{ return JSON.parse(localStorage.getItem(KEY_HIST)) || []; }catch(e){ return []; } }
+
+// --- Render tables
+function renderBase(){
+  const base = loadBase();
+  const wrap = document.getElementById('baseTableWrap');
+  if(!base.length){ wrap.innerHTML = '<div class="muted">Base vazia. Importe um Excel ou adicione itens.</div>'; updateCodigoSelect(); return; }
+  let html = '<table><thead><tr>';
+  const keys = Object.keys(base[0]);
+  keys.forEach(k => html += `<th>${k}</th>`);
+  html += '<th>Ações</th></tr></thead><tbody>';
+  base.forEach((row, i) => {
+    html += '<tr>';
+    keys.forEach(k => html += `<td>${row[k] !== undefined ? row[k] : ''}</td>`);
+    html += `<td><button class="small" onclick="removeBaseItem(${i})">Remover</button></td></tr>`;
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+  updateCodigoSelect();
+}
+function renderHist(){
+  const hist = loadHist();
+  const wrap = document.getElementById('histTableWrap');
+  if(!hist.length){ wrap.innerHTML = '<div class="muted">Histórico vazio.</div>'; return; }
+  let html = '<table><thead><tr>';
+  const keys = Object.keys(hist[0]);
+  keys.forEach(k => html += `<th>${k}</th>`);
+  html += '<th>Ações</th></tr></thead><tbody>';
+  hist.slice().reverse().forEach((row, idxRev) => {
+    // reverse for latest first; compute original index:
+    const i = hist.length - 1 - idxRev;
+    html += '<tr>';
+    keys.forEach(k => html += `<td>${row[k] !== undefined ? row[k] : ''}</td>`);
+    html += `<td><button class="small" onclick="removeHistItem(${i})">Apagar</button></td></tr>`;
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+// remove functions
+function removeBaseItem(i){
+  if(!confirm('Remover esse item da BaseAtual?')) return;
+  const base = loadBase();
+  base.splice(i,1);
+  saveBase(base); renderBase();
+}
+function removeHistItem(i){
+  if(!confirm('Remover esse item do Histórico? Esta ação é definitiva.')) return;
+  const hist = loadHist();
+  hist.splice(i,1);
+  saveHist(hist); renderHist();
+}
+
+// update select of codes
+function updateCodigoSelect(){
+  const sel = document.getElementById('selectCodigo');
+  sel.innerHTML = '<option value="">-- selecione --</option>';
+  const base = loadBase();
+  base.forEach(row => {
+    const code = row['Código'] || row['Codigo'] || row['codigo'] || row['code'] || row['Código '] || Object.values(row)[0];
+    const desc = row['Descrição'] || row['Descricao'] || row['descricao'] || row['Descrição '] || Object.values(row)[1] || '';
+    if(code!==undefined) {
+      sel.innerHTML += `<option value="${encodeURIComponent(code)}">${code} ${desc ? ' - ' + desc : ''}</option>`;
+    }
+  });
+}
+
+// read file
+let lastPreviewData = null;
+document.getElementById('fileInput').addEventListener('change', (ev)=>{
+  const f = ev.target.files[0];
+  lastPreviewData = null;
+  document.getElementById('previewArea').style.display = 'none';
+  if(!f) return;
+  const reader = new FileReader();
+  reader.onload = function(e){
+    const data = e.target.result;
+    let workbook;
+    try {
+      workbook = XLSX.read(data, {type: 'binary'});
+    } catch(err) {
+      try{
+        workbook = XLSX.read(data, {type: 'array'});
+      }catch(e2){
+        alert('Erro ao ler o arquivo. Use .xlsx, .xls ou .csv');
+        return;
+      }
+    }
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    const json = XLSX.utils.sheet_to_json(worksheet, {defval: ''});
+    lastPreviewData = json;
+    showPreview(json);
+  };
+  // support readAsBinaryString for xlsx:
+  if (f.name.endsWith('.csv')) reader.readAsText(f);
+  else reader.readAsBinaryString(f);
+});
+
+document.getElementById('previewBtn').addEventListener('click', ()=>{
+  if(!lastPreviewData) return alert('Nenhum arquivo carregado para visualizar. Selecione um arquivo primeiro.');
+  showPreview(lastPreviewData);
+});
+
+function showPreview(json){
+  const area = document.getElementById('previewArea');
+  const wrap = document.getElementById('previewTable');
+  area.style.display = 'block';
+  if(!json || !json.length){ wrap.innerHTML = '<div class="muted">Arquivo vazio ou sem linhas.</div>'; return;}
+  const keys = Object.keys(json[0]);
+  let html = '<table><thead><tr>';
+  keys.forEach(k => html += `<th>${k}</th>`);
+  html += '</tr></thead><tbody>';
+  json.slice(0,10).forEach(row => {
+    html += '<tr>';
+    keys.forEach(k => html += `<td>${row[k]}</td>`);
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+// import button: overwrite base
+document.getElementById('importBtn').addEventListener('click', ()=>{
+  if(!lastPreviewData) return alert('Selecione e visualize um arquivo primeiro.');
+  if(!confirm('Importar e substituir a BaseAtual? Os códigos antigos serão apagados. O Histórico não será alterado.')) return;
+  // Normalize header keys (trim) and ensure Codigo/Quantidade detection
+  const normalized = lastPreviewData.map(row=>{
+    const nr = {};
+    Object.keys(row).forEach(k=>{
+      const nk = k.trim();
+      nr[nk] = row[k];
+    });
+    return nr;
+  });
+  // detect numeric field for quantity:
+  const sample = normalized[0] || {};
+  const qKey = Object.keys(sample).find(k => /quantidade|qtd|qty|amount|quant/i.test(k)) || null;
+  // if there is a quantity key ensure numeric:
+  if(qKey){
+    normalized.forEach(r=>{ r[qKey] = r[qKey] === '' ? 0 : Number(r[qKey]); });
+  }
+  // Overwrite base
+  saveBase(normalized);
+  renderBase();
+  alert('Importação concluída: BaseAtual substituída. Histórico preservado.');
+});
+
+// registrar retirada
+document.getElementById('registrarRet').addEventListener('click', ()=>{
+  const sel = document.getElementById('selectCodigo');
+  const codeEnc = sel.value;
+  if(!codeEnc) return alert('Selecione um código.');
+  const code = decodeURIComponent(codeEnc);
+  const qtd = Number(document.getElementById('retQtd').value) || 0;
+  if(qtd <= 0) return alert('Informe uma quantidade válida (>0).');
+  const resp = document.getElementById('retResp').value || '—';
+  const obs = document.getElementById('retObs').value || '';
+  const base = loadBase();
+  // find row by code (search common keys)
+  const idx = base.findIndex(r => {
+    const c = r['Código'] || r['Codigo'] || r['codigo'] || r['code'] || Object.values(r)[0];
+    return String(c) === String(code);
+  });
+  if(idx === -1) return alert('Código não encontrado na BaseAtual.');
+  // update quantity if field exists
+  const row = base[idx];
+  const qKey = Object.keys(row).find(k => /quantidade|qtd|qty|amount|quant/i.test(k)) || null;
+  if(qKey){
+    // ensure numeric
+    row[qKey] = Number(row[qKey]) || 0;
+    if(row[qKey] < qtd) {
+      if(!confirm('A quantidade retirável é menor que a solicitada. Deseja prosseguir e permitir valor negativo?')) {}
+    }
+    row[qKey] = row[qKey] - qtd;
+  }
+  saveBase(base);
+  // add to history
+  const hist = loadHist();
+  const entry = {
+    Data: new Date().toLocaleString(),
+    Código: code,
+    Quantidade: qtd,
+    Responsável: resp,
+    Observações: obs
+  };
+  hist.push(entry);
+  saveHist(hist);
+  renderBase();
+  renderHist();
+  alert('Retirada registrada no Histórico.');
+});
+
+// export buttons
+document.getElementById('exportBaseBtn').addEventListener('click', ()=>{
+  const base = loadBase();
+  if(!base.length) return alert('Base vazia.');
+  const csv = toCSV(base);
+  download('baseAtual.csv', csv);
+});
+document.getElementById('exportHistBtn').addEventListener('click', ()=>{
+  const hist = loadHist();
+  if(!hist.length) return alert('Histórico vazio.');
+  const csv = toCSV(hist);
+  download('historico_retiradas.csv', csv);
+});
+
+// clear buttons
+document.getElementById('clearBaseBtn').addEventListener('click', ()=>{
+  if(!confirm('Apagar toda a BaseAtual? A ação apagará todos os códigos armazenados.')) return;
+  saveBase([]);
+  renderBase();
+});
+document.getElementById('clearHistBtn').addEventListener('click', ()=>{
+  if(!confirm('Apagar TODO o Histórico? Esta ação é irreversível.')) return;
+  saveHist([]);
+  renderHist();
+});
+
+// initial render
+renderBase();
+renderHist();
+updateCodigoSelect();
+</script>
+</body>
+</html>
