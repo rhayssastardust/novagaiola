@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Novo Controle de Estoque - Gaiola</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; background-color: #f4f7f9; color: #333; }
+        .container { max-width: 1200px; margin: 20px auto; padding: 20px; background-color: #fff; box-shadow: 0 4px 8px rgba(0,0,0,0.1); border-radius: 8px; }
+        h1, h2 { color: #0056b3; text-align: center; }
+        .controls { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; margin-bottom: 20px; padding: 15px; background-color: #e9ecef; border-radius: 8px; }
+        .controls div { flex: 1; min-width: 250px; margin: 10px; }
+        input[type="text"], input[type="file"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        th { background-color: #0056b3; color: white; }
+        tbody tr:nth-child(even) { background-color: #f2f2f2; }
+        tbody tr:hover { background-color: #e2f1ff; }
+        .btn { padding: 8px 12px; border: none; background-color: #28a745; color: white; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        .btn-danger { background-color: #dc3545; }
+        .modal { /* Estilos para o pop-up de baixa */ }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Controle de Estoque - Gaiola</h1>
+
+    <div class="controls">
+        <div>
+            <label for="file-input">Importar Planilha (Substitui o estoque atual)</label>
+            <input type="file" id="file-input" accept=".xlsx, .xls, .csv">
+        </div>
+        <div>
+            <label for="search-input">Buscar por Código ou Descrição:</label>
+            <input type="text" id="search-input" placeholder="Digite para buscar...">
+        </div>
+    </div>
+
+    <h2>Itens em Estoque</h2>
+    <div style="overflow-x:auto;">
+        <table id="stock-table">
+            <thead>
+                <tr>
+                    <th>CÓDIGO</th>
+                    <th>DESCRIÇÃO</th>
+                    <th>QUANT.</th>
+                    <th>CAIXA</th>
+                    <th>LOCALIZAÇÃO</th>
+                    <th>AÇÃO</th>
+                </tr>
+            </thead>
+            <tbody>
+                </tbody>
+        </table>
+    </div>
+    
+    <hr style="margin: 30px 0;">
+
+    <h2>Histórico de Retiradas</h2>
+    <div style="overflow-x:auto;">
+        <table id="history-table">
+            <thead>
+                <tr>
+                    <th>Data</th>
+                    <th>CÓDIGO</th>
+                    <th>DESCRIÇÃO</th>
+                    <th>QUANT. RETIRADA</th>
+                </tr>
+            </thead>
+            <tbody>
+                </tbody>
+        </table>
+    </div>
+
+</div>
+
+<script>
+// --- LÓGICA DO SISTEMA ---
+
+// Elementos da página
+const fileInput = document.getElementById('file-input');
+const searchInput = document.getElementById('search-input');
+const stockTableBody = document.querySelector('#stock-table tbody');
+const historyTableBody = document.querySelector('#history-table tbody');
+
+// Função principal que é executada quando a página carrega
+document.addEventListener('DOMContentLoaded', () => {
+    // Adiciona os "escutadores" de eventos
+    fileInput.addEventListener('change', handleFileImport);
+    searchInput.addEventListener('input', renderStockTable);
+
+    // Carrega e exibe os dados salvos
+    renderStockTable();
+    renderHistoryTable();
+});
+
+/**
+ * Lida com a importação do arquivo Excel/CSV.
+ * Apaga o estoque antigo, mas MANTÉM o histórico.
+ */
+function handleFileImport(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        try {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+            
+            // Converte a planilha para JSON. Renomeia as colunas para simplificar.
+            const newStock = XLSX.utils.sheet_to_json(worksheet).map(item => ({
+                codigo: item['CÓDIGO TETRA PAK'] || item['CODIGO'] || 'N/A',
+                descricao: item['DESC.'] || item['DESCRIÇÃO'] || 'Sem descrição',
+                quantidade: parseInt(item['QUANT.'] || item['QUANT'], 10) || 0,
+                caixa: item['CAIXA'] || 'N/A',
+                localizacao: item['LOCALIZAÇÃO'] || 'N/A'
+            }));
+
+            // **AQUI ESTÁ A LÓGICA PRINCIPAL QUE VOCÊ PEDIU**
+            // 1. Remove o estoque antigo. O histórico NÃO é tocado.
+            localStorage.removeItem('estoque');
+            
+            // 2. Salva o novo estoque
+            localStorage.setItem('estoque', JSON.stringify(newStock));
+
+            alert(`Estoque atualizado com ${newStock.length} itens! O histórico de retiradas foi mantido.`);
+            renderStockTable(); // Atualiza a tabela na tela
+            fileInput.value = ''; // Limpa o campo do arquivo
+        } catch (error) {
+            console.error('Erro ao importar o arquivo:', error);
+            alert('Falha ao importar a planilha. Verifique o formato do arquivo.');
+        }
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+/**
+ * Pega os dados do estoque do localStorage, filtra e exibe na tabela.
+ */
+function renderStockTable() {
+    const stock = JSON.parse(localStorage.getItem('estoque')) || [];
+    const searchTerm = searchInput.value.toLowerCase();
+
+    const filteredStock = stock.filter(item => {
+        const codigo = String(item.codigo).toLowerCase();
+        const descricao = String(item.descricao).toLowerCase();
+        return codigo.includes(searchTerm) || descricao.includes(searchTerm);
+    });
+
+    stockTableBody.innerHTML = ''; // Limpa a tabela antes de preencher
+    if (filteredStock.length === 0) {
+        stockTableBody.innerHTML = '<tr><td colspan="6" style="text-align:center;">Nenhum item encontrado. Importe uma planilha.</td></tr>';
+        return;
+    }
+
+    filteredStock.forEach((item, index) => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${item.codigo}</td>
+            <td>${item.descricao}</td>
+            <td><strong>${item.quantidade}</strong></td>
+            <td>${item.caixa}</td>
+            <td>${item.localizacao}</td>
+            <td><button class="btn btn-danger" onclick="withdrawItem('${item.codigo}')">Dar Baixa</button></td>
+        `;
+        stockTableBody.appendChild(row);
+    });
+}
+
+/**
+ * Pega os dados do histórico e exibe na tabela.
+ */
+function renderHistoryTable() {
+    const history = JSON.parse(localStorage.getItem('historico')) || [];
+    historyTableBody.innerHTML = ''; // Limpa a tabela
+
+    if (history.length === 0) {
+        historyTableBody.innerHTML = '<tr><td colspan="4" style="text-align:center;">Nenhuma retirada registrada.</td></tr>';
+        return;
+    }
+
+    // Ordena para mostrar as retiradas mais recentes primeiro
+    history.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    history.forEach(entry => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${new Date(entry.date).toLocaleString('pt-BR')}</td>
+            <td>${entry.codigo}</td>
+            <td>${entry.descricao}</td>
+            <td>${entry.quantidadeRetirada}</td>
+        `;
+        historyTableBody.appendChild(row);
+    });
+}
+
+/**
+ * Lógica para dar baixa em um item.
+ */
+function withdrawItem(codigo) {
+    const stock = JSON.parse(localStorage.getItem('estoque')) || [];
+    const itemIndex = stock.findIndex(item => String(item.codigo) === String(codigo));
+
+    if (itemIndex === -1) {
+        alert('Erro: Item não encontrado!');
+        return;
+    }
+
+    const item = stock[itemIndex];
+    const quantityToRemove = prompt(`Dar baixa no item: ${item.descricao}\n\nQuantidade em estoque: ${item.quantidade}\n\nDigite a quantidade que deseja retirar:`, 1);
+
+    if (quantityToRemove === null || quantityToRemove.trim() === '') {
+        return; // Usuário cancelou
+    }
+
+    const quantity = parseInt(quantityToRemove, 10);
+    if (isNaN(quantity) || quantity <= 0) {
+        alert('Por favor, insira um número válido e maior que zero.');
+        return;
+    }
+
+    if (quantity > item.quantidade) {
+        alert('Erro: A quantidade de retirada não pode ser maior que o estoque.');
+        return;
+    }
+
+    // Atualiza a quantidade no estoque
+    stock[itemIndex].quantidade -= quantity;
+    localStorage.setItem('estoque', JSON.stringify(stock));
+
+    // Adiciona o registro no histórico
+    const history = JSON.parse(localStorage.getItem('historico')) || [];
+    history.push({
+        date: new Date().toISOString(),
+        codigo: item.codigo,
+        descricao: item.descricao,
+        quantidadeRetirada: quantity
+    });
+    localStorage.setItem('historico', JSON.stringify(history));
+
+    // Atualiza as duas tabelas
+    renderStockTable();
+    renderHistoryTable();
+}
+</script>
+
+</body>
+</html>
