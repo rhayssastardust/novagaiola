@@ -1,0 +1,374 @@
+!DOCTYPE html
+html lang=pt-br
+head
+  meta charset=utf-8 
+  meta name=viewport content=width=device-width,initial-scale=1 
+  titleGestão - Nova Gaiolatitle
+  style
+    body { font-family Arial, Helvetica, sans-serif; margin 16px; background#f7f8fb; color#111;}
+    h1 { margin 0 0 8px 0; font-size 20px; }
+    .card { backgroundwhite; border-radius8px; padding12px; box-shadow0 1px 4px rgba(0,0,0,0.06); margin-bottom12px; }
+    .row { displayflex; gap12px; align-itemscenter; flex-wrapwrap; }
+    label { font-size13px; margin-right6px; }
+    input[type=file] { displayblock; }
+    button { background#0b6efd; colorwhite; bordernone; padding8px 10px; border-radius6px; cursorpointer; }
+    button.secondary { background#6c757d; }
+    table { width100%; border-collapsecollapse; font-size13px; margin-top8px;}
+    th, td { padding8px; border-bottom1px solid #eee; text-alignleft; }
+    th { background#fafbff; positionsticky; top0; }
+    .controls { displayflex; gap8px; flex-wrapwrap; }
+    .small { padding6px 8px; font-size13px; }
+    .danger { background#dc3545; }
+    .green { background#198754; }
+    .muted { color#666; font-size13px; }
+    .inline { displayinline-block; vertical-alignmiddle; }
+    select, input[type=text], input[type=number] { padding6px; border-radius6px; border1px solid #ddd; }
+    .half { width200px; }
+    .flex-col { displayflex; flex-directioncolumn; gap8px; }
+    .toolbar { displayflex; justify-contentspace-between; align-itemscenter; gap12px; margin-bottom12px; flex-wrapwrap; }
+    .notice { background#fff3cd; border1px solid #ffeeba; padding8px; border-radius6px; color#856404; margin-bottom12px; }
+  style
+  !-- SheetJS (XLSX) via CDN --
+  script src=httpsunpkg.comxlsxdistxlsx.full.min.jsscript
+head
+body
+  h1Gestão de Códigos — Nova Gaiolah1
+
+  div class=notice card
+    strongResumostrong Ao emImportar e Substituir Códigosem a aba codeBaseAtualcode será totalmente sobrescrita — o codeHistóricocode permanece inalterado.
+  div
+
+  div class=card
+    div class=toolbar
+      div class=controls
+        div
+          label for=fileInputImportar Excel (.xlsx  .xls  .csv)labelbr
+          input id=fileInput type=file accept=.xlsx,.xls,.csv 
+        div
+        div
+          button id=previewBtn class=smallVisualizar arquivobutton
+          button id=importBtn class=small greenImportar e Substituir Códigosbutton
+        div
+        div
+          button id=exportBaseBtn class=small secondaryExportar BaseAtual (CSV)button
+          button id=exportHistBtn class=small secondaryExportar Histórico (CSV)button
+        div
+      div
+
+      div class=muted
+        Dados salvos localmente no navegador. Faça export para backup.
+      div
+    div
+
+    div id=previewArea style=displaynone; margin-top8px;
+      strongPré-visualização (primeiras linhas)strong
+      div id=previewTable style=max-height240px; overflowauto; margin-top8px;div
+    div
+  div
+
+  div class=row
+    div style=flex1 1 420px; class=card
+      h3Registrar retiradah3
+      div class=flex-col
+        div
+          labelCódigolabelbr
+          select id=selectCodigo class=halfselect
+        div
+        div
+          labelQuantidadelabelbr
+          input id=retQtd type=number min=1 value=1 class=half 
+        div
+        div
+          labelResponsávellabelbr
+          input id=retResp type=text placeholder=Nome do colaborador class=half 
+        div
+        div
+          labelObservaçõeslabelbr
+          input id=retObs type=text placeholder=Observações (opcional) 
+        div
+        div
+          button id=registrarRet class=smallRegistrar Retiradabutton
+        div
+      div
+    div
+
+    div style=flex1 1 560px; class=card
+      h3BaseAtualh3
+      div id=baseTableWrap style=max-height340px; overflowauto;div
+      div style=margin-top8px;
+        button id=clearBaseBtn class=small dangerLimpar BaseAtualbutton
+      div
+    div
+  div
+
+  div class=card
+    h3Histórico de Retiradash3
+    div id=histTableWrap style=max-height360px; overflowauto;div
+    div style=margin-top8px;
+      button id=clearHistBtn class=small dangerLimpar Histórico (apaga tudo)button
+    div
+  div
+
+script
+
+  Sistema simples de importação e histórico
+  - Usa SheetJS (XLSX) para ler planilhas no navegador
+  - Persistência via localStorage nas chaves baseAtual  historicoRetiradas
+
+
+ --- Helpers CSV  download
+function download(filename, text) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], {type 'textcsv;charset=utf-8;'}));
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+function toCSV(array) {
+  if(!array  !array.length) return '';
+  const keys = Object.keys(array[0]);
+  const lines = [keys.join(',')];
+  array.forEach(obj = {
+    const row = keys.map(k = {
+      let v = obj[k]===undefined  obj[k]===null  ''  String(obj[k]);
+      if(v.includes(',')v.includes('')v.includes('n')) v = '' + v.replace(g,'') + '';
+      return v;
+    });
+    lines.push(row.join(','));
+  });
+  return lines.join('n');
+}
+
+ --- Local storage helpers
+const KEY_BASE = 'novagaiola_baseAtual_v1';
+const KEY_HIST = 'novagaiola_historicoRetiradas_v1';
+function saveBase(base){ localStorage.setItem(KEY_BASE, JSON.stringify(base  [])); }
+function loadBase(){ try{ return JSON.parse(localStorage.getItem(KEY_BASE))  []; }catch(e){ return []; } }
+function saveHist(hist){ localStorage.setItem(KEY_HIST, JSON.stringify(hist  [])); }
+function loadHist(){ try{ return JSON.parse(localStorage.getItem(KEY_HIST))  []; }catch(e){ return []; } }
+
+ --- Render tables
+function renderBase(){
+  const base = loadBase();
+  const wrap = document.getElementById('baseTableWrap');
+  if(!base.length){ wrap.innerHTML = 'div class=mutedBase vazia. Importe um Excel ou adicione itens.div'; updateCodigoSelect(); return; }
+  let html = 'tabletheadtr';
+  const keys = Object.keys(base[0]);
+  keys.forEach(k = html += `th${k}th`);
+  html += 'thAçõesthtrtheadtbody';
+  base.forEach((row, i) = {
+    html += 'tr';
+    keys.forEach(k = html += `td${row[k] !== undefined  row[k]  ''}td`);
+    html += `tdbutton class=small onclick=removeBaseItem(${i})Removerbuttontdtr`;
+  });
+  html += 'tbodytable';
+  wrap.innerHTML = html;
+  updateCodigoSelect();
+}
+function renderHist(){
+  const hist = loadHist();
+  const wrap = document.getElementById('histTableWrap');
+  if(!hist.length){ wrap.innerHTML = 'div class=mutedHistórico vazio.div'; return; }
+  let html = 'tabletheadtr';
+  const keys = Object.keys(hist[0]);
+  keys.forEach(k = html += `th${k}th`);
+  html += 'thAçõesthtrtheadtbody';
+  hist.slice().reverse().forEach((row, idxRev) = {
+     reverse for latest first; compute original index
+    const i = hist.length - 1 - idxRev;
+    html += 'tr';
+    keys.forEach(k = html += `td${row[k] !== undefined  row[k]  ''}td`);
+    html += `tdbutton class=small onclick=removeHistItem(${i})Apagarbuttontdtr`;
+  });
+  html += 'tbodytable';
+  wrap.innerHTML = html;
+}
+
+ remove functions
+function removeBaseItem(i){
+  if(!confirm('Remover esse item da BaseAtual')) return;
+  const base = loadBase();
+  base.splice(i,1);
+  saveBase(base); renderBase();
+}
+function removeHistItem(i){
+  if(!confirm('Remover esse item do Histórico Esta ação é definitiva.')) return;
+  const hist = loadHist();
+  hist.splice(i,1);
+  saveHist(hist); renderHist();
+}
+
+ update select of codes
+function updateCodigoSelect(){
+  const sel = document.getElementById('selectCodigo');
+  sel.innerHTML = 'option value=-- selecione --option';
+  const base = loadBase();
+  base.forEach(row = {
+    const code = row['Código']  row['Codigo']  row['codigo']  row['code']  row['Código ']  Object.values(row)[0];
+    const desc = row['Descrição']  row['Descricao']  row['descricao']  row['Descrição ']  Object.values(row)[1]  '';
+    if(code!==undefined) {
+      sel.innerHTML += `option value=${encodeURIComponent(code)}${code} ${desc  ' - ' + desc  ''}option`;
+    }
+  });
+}
+
+ read file
+let lastPreviewData = null;
+document.getElementById('fileInput').addEventListener('change', (ev)={
+  const f = ev.target.files[0];
+  lastPreviewData = null;
+  document.getElementById('previewArea').style.display = 'none';
+  if(!f) return;
+  const reader = new FileReader();
+  reader.onload = function(e){
+    const data = e.target.result;
+    let workbook;
+    try {
+      workbook = XLSX.read(data, {type 'binary'});
+    } catch(err) {
+      try{
+        workbook = XLSX.read(data, {type 'array'});
+      }catch(e2){
+        alert('Erro ao ler o arquivo. Use .xlsx, .xls ou .csv');
+        return;
+      }
+    }
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    const json = XLSX.utils.sheet_to_json(worksheet, {defval ''});
+    lastPreviewData = json;
+    showPreview(json);
+  };
+   support readAsBinaryString for xlsx
+  if (f.name.endsWith('.csv')) reader.readAsText(f);
+  else reader.readAsBinaryString(f);
+});
+
+document.getElementById('previewBtn').addEventListener('click', ()={
+  if(!lastPreviewData) return alert('Nenhum arquivo carregado para visualizar. Selecione um arquivo primeiro.');
+  showPreview(lastPreviewData);
+});
+
+function showPreview(json){
+  const area = document.getElementById('previewArea');
+  const wrap = document.getElementById('previewTable');
+  area.style.display = 'block';
+  if(!json  !json.length){ wrap.innerHTML = 'div class=mutedArquivo vazio ou sem linhas.div'; return;}
+  const keys = Object.keys(json[0]);
+  let html = 'tabletheadtr';
+  keys.forEach(k = html += `th${k}th`);
+  html += 'trtheadtbody';
+  json.slice(0,10).forEach(row = {
+    html += 'tr';
+    keys.forEach(k = html += `td${row[k]}td`);
+    html += 'tr';
+  });
+  html += 'tbodytable';
+  wrap.innerHTML = html;
+}
+
+ import button overwrite base
+document.getElementById('importBtn').addEventListener('click', ()={
+  if(!lastPreviewData) return alert('Selecione e visualize um arquivo primeiro.');
+  if(!confirm('Importar e substituir a BaseAtual Os códigos antigos serão apagados. O Histórico não será alterado.')) return;
+   Normalize header keys (trim) and ensure CodigoQuantidade detection
+  const normalized = lastPreviewData.map(row={
+    const nr = {};
+    Object.keys(row).forEach(k={
+      const nk = k.trim();
+      nr[nk] = row[k];
+    });
+    return nr;
+  });
+   detect numeric field for quantity
+  const sample = normalized[0]  {};
+  const qKey = Object.keys(sample).find(k = quantidadeqtdqtyamountquanti.test(k))  null;
+   if there is a quantity key ensure numeric
+  if(qKey){
+    normalized.forEach(r={ r[qKey] = r[qKey] === ''  0  Number(r[qKey]); });
+  }
+   Overwrite base
+  saveBase(normalized);
+  renderBase();
+  alert('Importação concluída BaseAtual substituída. Histórico preservado.');
+});
+
+ registrar retirada
+document.getElementById('registrarRet').addEventListener('click', ()={
+  const sel = document.getElementById('selectCodigo');
+  const codeEnc = sel.value;
+  if(!codeEnc) return alert('Selecione um código.');
+  const code = decodeURIComponent(codeEnc);
+  const qtd = Number(document.getElementById('retQtd').value)  0;
+  if(qtd = 0) return alert('Informe uma quantidade válida (0).');
+  const resp = document.getElementById('retResp').value  '—';
+  const obs = document.getElementById('retObs').value  '';
+  const base = loadBase();
+   find row by code (search common keys)
+  const idx = base.findIndex(r = {
+    const c = r['Código']  r['Codigo']  r['codigo']  r['code']  Object.values(r)[0];
+    return String(c) === String(code);
+  });
+  if(idx === -1) return alert('Código não encontrado na BaseAtual.');
+   update quantity if field exists
+  const row = base[idx];
+  const qKey = Object.keys(row).find(k = quantidadeqtdqtyamountquanti.test(k))  null;
+  if(qKey){
+     ensure numeric
+    row[qKey] = Number(row[qKey])  0;
+    if(row[qKey]  qtd) {
+      if(!confirm('A quantidade retirável é menor que a solicitada. Deseja prosseguir e permitir valor negativo')) {}
+    }
+    row[qKey] = row[qKey] - qtd;
+  }
+  saveBase(base);
+   add to history
+  const hist = loadHist();
+  const entry = {
+    Data new Date().toLocaleString(),
+    Código code,
+    Quantidade qtd,
+    Responsável resp,
+    Observações obs
+  };
+  hist.push(entry);
+  saveHist(hist);
+  renderBase();
+  renderHist();
+  alert('Retirada registrada no Histórico.');
+});
+
+ export buttons
+document.getElementById('exportBaseBtn').addEventListener('click', ()={
+  const base = loadBase();
+  if(!base.length) return alert('Base vazia.');
+  const csv = toCSV(base);
+  download('baseAtual.csv', csv);
+});
+document.getElementById('exportHistBtn').addEventListener('click', ()={
+  const hist = loadHist();
+  if(!hist.length) return alert('Histórico vazio.');
+  const csv = toCSV(hist);
+  download('historico_retiradas.csv', csv);
+});
+
+ clear buttons
+document.getElementById('clearBaseBtn').addEventListener('click', ()={
+  if(!confirm('Apagar toda a BaseAtual A ação apagará todos os códigos armazenados.')) return;
+  saveBase([]);
+  renderBase();
+});
+document.getElementById('clearHistBtn').addEventListener('click', ()={
+  if(!confirm('Apagar TODO o Histórico Esta ação é irreversível.')) return;
+  saveHist([]);
+  renderHist();
+});
+
+ initial render
+renderBase();
+renderHist();
+updateCodigoSelect();
+script
+body
+html
